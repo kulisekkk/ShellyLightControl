@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shelly Control</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #f5f5f7;
+            color: #1d1d1f;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* LEVÝ PANEL (Správa) */
+        .sidebar {
+            width: 320px;
+            background-color: white;
+            border-right: 1px solid #d2d2d7;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.05);
+            overflow-y: auto;
+        }
+
+        /* HLAVNÍ PLOCHA (Pravá strana) */
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            background-color: #f5f5f7;
+            overflow-y: auto;
+            position: relative; /* Pro pozicování edit tlačítka */
+        }
+
+        .btn-edit {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: auto !important;
+            padding: 10px 20px !important;
+            z-index: 100;
+            background-color: #8e8e93;
+        }
+        .btn-edit.active {
+            background-color: #34c759;
+        }
+
+        /* MAPA / PŮDORYS */
+        .floorplan-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background-color: white;
+            border: 2px solid #1d1d1f;
+            border-radius: 4px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .floorplan-image {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            pointer-events: none;
+        }
+
+        /* Staré zdi odstraněny, nyní se používá obrázek */
+
+        /* TLAČÍTKO SVĚTLA NA MAPĚ */
+        .light-widget {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 10;
+            cursor: default; /* Výchozí stav není editovatelný */
+            user-select: none;
+        }
+
+        .light-name {
+            font-size: 11px;
+            font-weight: bold;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            pointer-events: none; /* Název neblokuje drag */
+        }
+
+        .btn-toggle {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border: 2px solid white;
+            cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            transition: background-color 0.3s ease, box-shadow 0.3s ease;
+            font-weight: bold;
+            font-size: 11px;
+        }
+
+        /* Barva tlačítka podle stavu */
+        .light-on {
+            background-color: #ffcc00;
+            color: #1d1d1f;
+            box-shadow: 0 0 20px #ffcc00;
+        }
+        .light-off {
+            background-color: #8e8e93;
+            color: white;
+        }
+
+        /* Styl pro boční panel */
+        h2 { font-size: 18px; margin: 0 0 10px 0; }
+        .btn {
+            background-color: #0071e3; color: white; border: none;
+            padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold;
+            font-size: 14px; transition: background-color 0.2s; width: 100%;
+            box-sizing: border-box;
+        }
+        .btn:active { background-color: #005bb5; }
+        .btn-scan { background-color: #34c759; }
+        .btn-scan:active { background-color: #28a745; }
+        .btn-save { background-color: #ff9500; margin-top: 10px; }
+        .btn-save:active { background-color: #e08500; }
+
+        .loading { font-style: italic; color: #888; display: none; text-align: center; margin-top: 10px; }
+        ul { list-style: none; padding: 0; margin: 0; }
+        li { padding: 10px 0; border-bottom: 1px solid #eee; font-size: 14px; }
+
+        /* NOTIFIKACE (Bottom Right Stacking) */
+        #notification-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+
+        .notification {
+            min-width: 250px;
+            max-width: 350px;
+            padding: 15px 20px;
+            border-radius: 12px;
+            background: white;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+            font-size: 14px;
+            font-weight: 500;
+            color: #1d1d1f;
+            pointer-events: auto;
+            animation: slideIn 0.3s ease-out forwards;
+            border-left: 6px solid #8e8e93;
+        }
+
+        .notification.success {
+            border-left-color: #34c759;
+            background-color: #f2fff5;
+        }
+
+        .notification.error {
+            border-left-color: #ff453a;
+            background-color: #fff2f2;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        @keyframes fadeOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(20px); opacity: 0; }
+        }
+
+        .notification.hide {
+            animation: fadeOut 0.3s ease-in forwards;
+        }
+
+        .btn-list {
+            width: auto !important;
+            padding: 8px !important;
+            font-size: 12px !important;
+            flex: 1;
+        }
+        .btn-remove {
+            background-color: #ff453a !important;
+        }
+        .btn-remove:active {
+            background-color: #c9342b !important;
+        }
+
+        /* MODAL */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        }
+        .modal-content {
+            background: white;
+            padding: 25px;
+            border-radius: 16px;
+            width: 300px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .modal-content h3 { margin: 0; font-size: 18px; }
+        .modal-field { display: flex; flex-direction: column; gap: 5px; }
+        .modal-field label { font-size: 12px; font-weight: bold; color: #666; }
+        .modal-field input[type="text"] {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        .modal-field .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .btn-cancel { background-color: #8e8e93; }
+    </style>
+</head>
+<body>
+
+<div id="manual-modal" class="modal-overlay">
+    <div class="modal-content">
+        <h3>Přidat zařízení</h3>
+        <div class="modal-field">
+            <label>Název</label>
+            <input type="text" id="manual-name" placeholder="Kuchyně">
+        </div>
+        <div class="modal-field">
+            <label>Lokální IP Adresa</label>
+            <input type="text" id="manual-ip" placeholder="192.168.100.x">
+        </div>
+        <div class="modal-field">
+            <label class="checkbox-group">
+                <input type="checkbox" id="manual-status"> Výchozí stav (Zapnuto)
+            </label>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-cancel" onclick="hideManualModal()">Zrušit</button>
+            <button class="btn" onclick="submitManualAdd()">Uložit</button>
+        </div>
+    </div>
+</div>
+
+<div class="sidebar">
+    <h2>Ovládací panel Shelly zařízení</h2>
+    <div id="notification-container"></div>
+
+    <div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-scan" style="flex: 1;" onclick="startScanning()">Skenovat sítě</button>
+            <button class="btn" style="flex: 1; background-color: #5856d6;" onclick="showManualModal()">Přidat manuálně</button>
+        </div>
+        <div id="scan-loading" class="loading">Skenuji podsítě...</div>
+        <ul id="scanned-list"></ul>
+    </div>
+
+    <hr style="border:0; border-top:1px solid #eee; width:100%;">
+
+    <div>
+        <h2>Seznam zařízení</h2>
+        <ul id="my-devices-list"></ul>
+        <div style="margin-top: 15px; padding: 10px; background: #f5f5f7; border-radius: 8px;">
+            <label style="font-size: 13px; font-weight: bold; color: #666; display: block; margin-bottom: 5px;">Velikost tlačítek na mapě</label>
+            <input type="range" id="global-size-slider" min="20" max="150" value="50" style="width: 100%;" oninput="updateAllButtonSizes(this.value)">
+        </div>
+        <button class="btn" style="background-color: #ff9500; margin-top: 10px;" onclick="pickFloorplan()">Změnit půdorys</button>
+    </div>
+</div>
+
+<div class="main-content">
+    <button id="edit-mode-btn" class="btn btn-edit" onclick="toggleEditMode()">Režim úprav: VYP</button>
+    <h1 style="margin-top: 0; margin-bottom: 20px;">IT - Ovládání Shelly zařízení</h1>
+
+    <div class="floorplan-container" id="floorplan">
+        <img src="ITPLAN.png" class="floorplan-image" alt="Půdorys">
+    </div>
+</div>
+
+<script>
+    let savedDevices = [];
+    let tempScannedDevices = {};
+    let editMode = false;
+    let uptimeData = {}; // Uchovává timestamp zapnutí: { "DeviceName": timestamp }
+
+    window.onload = function() {
+        // Kontrola vlastního půdorysu
+        if (window.API && window.API.getFloorplanData) {
+            const customData = window.API.getFloorplanData();
+            if (customData) {
+                document.querySelector('.floorplan-image').src = customData;
+            }
+        }
+
+        if (window.API && window.API.loadDevices) {
+            window.API.loadDevices();
+        }
+        // Síťový status kontrolujeme každé 3 vteřiny
+        setInterval(refreshNetworkStatus, 3000);
+        // Timer na vteřiny běží každou vteřinu pro plynulost
+        setInterval(updateUptimeTimers, 1000);
+    };
+
+    function receiveStoredDevices(jsonString) {
+        try {
+            const data = JSON.parse(jsonString);
+            savedDevices = data.devices || [];
+
+            // Nastavení slideru podle prvního zařízení, pokud existuje
+            if (savedDevices.length > 0 && savedDevices[0].size) {
+                document.getElementById("global-size-slider").value = savedDevices[0].size;
+            }
+
+            renderMapDevices();
+        } catch (e) {
+            console.error("Chyba při parsování uložených zařízení:", e);
+        }
+    }
+
+    function updateAllButtonSizes(newSize) {
+        savedDevices.forEach(dev => {
+            dev.size = parseInt(newSize);
+        });
+        renderMapDevices();
+    }
+
+    function renderMapDevices() {
+        const container = document.getElementById("floorplan");
+        const list = document.getElementById("my-devices-list");
+
+        document.querySelectorAll('.light-widget').forEach(el => el.remove());
+        list.innerHTML = "";
+
+        savedDevices.forEach(dev => {
+            const widget = document.createElement("div");
+            widget.className = "light-widget";
+            widget.style.left = (dev.x !== undefined ? dev.x : 50) + "%";
+            widget.style.top = (dev.y !== undefined ? dev.y : 50) + "%";
+            widget.setAttribute("data-name", dev.name);
+
+            const statusClass = dev.isOn ? "light-on" : "light-off";
+            const statusText = dev.isOn ? "ON" : "OFF";
+            const size = dev.size || 50;
+
+            widget.innerHTML = `
+                <div class="light-name">${dev.name}</div>
+                <button class="btn-toggle ${statusClass}" style="width: ${size}px; height: ${size}px;">
+                    ${statusText}
+                </button>
+            `;
+
+            // Nastavení kurzoru podle aktuálního režimu
+            widget.style.cursor = editMode ? 'move' : 'default';
+
+            // Navázání eventů pro přesouvání (Drag & Drop)
+            setupDragAndDrop(widget, dev.name);
+
+            // Navázání kliknutí na tlačítko uvnitř widgetu
+            widget.querySelector('.btn-toggle').addEventListener('click', (e) => {
+                e.stopPropagation();
+                triggerToggle(dev.name);
+            });
+
+            container.appendChild(widget);
+
+            const li = document.createElement("li");
+            // Bezpečné ID pro české znaky a mezery
+            const safeId = dev.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+            li.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 5px;">
+                    <div>
+                        <strong>${dev.name}</strong><br>
+                        <small>${dev.ip}</small><br>
+                        <small id="status-${safeId}" style="color: #888;">Checking...</small>
+                    </div>
+                    <div id="uptime-${safeId}" style="font-size: 12px; font-weight: bold; text-align: right; color: #888;">
+                        00:00:00
+                    </div>
+                </div>
+                <div style="display: flex; gap: 8px; margin-top: 8px;">
+                    <button class="btn btn-list" onclick="triggerToggle('${dev.name.replace(/'/g, "\\'")}')">
+                        ${dev.isOn ? 'Vypnout' : 'Zapnout'}
+                    </button>
+                    <button class="btn btn-list btn-remove" onclick="removeFromList('${dev.name.replace(/'/g, "\\'")}')">
+                        Odebrat
+                    </button>
+                </div>
+            `;
+            list.appendChild(li);
+
+            // Pokud je zařízení zapnuté a ještě nemá start timeru, nastavíme ho na teď
+            if (dev.isOn && !uptimeData[dev.name]) {
+                uptimeData[dev.name] = Date.now();
+            } else if (!dev.isOn) {
+                delete uptimeData[dev.name];
+            }
+        });
+    }
+
+    function removeFromList(name) {
+        if (confirm(`Opravdu chcete odebrat zařízení ${name}?`)) {
+            if (window.API && window.API.removeDevice) {
+                window.API.removeDevice(name);
+            }
+        }
+    }
+    function toggleEditMode() {
+        editMode = !editMode;
+        const btn = document.getElementById("edit-mode-btn");
+        btn.innerText = `Režim úprav: ${editMode ? 'ZAP' : 'VYP'}`;
+        btn.classList.toggle("active", editMode);
+
+        // Změna kurzoru a chování widgetů
+        document.querySelectorAll('.light-widget').forEach(w => {
+            w.style.cursor = editMode ? 'move' : 'default';
+        });
+
+        if (!editMode) {
+            saveCurrentPositions();
+            showAlert("Režim úprav vypnut. Pozice byly uloženy.", "success");
+        }
+    }
+
+    function setupDragAndDrop(widget, deviceName) {
+        let isDragging = false;
+        const container = document.getElementById("floorplan");
+
+        function moveHandler(e) {
+            if (!isDragging || !editMode) return;
+
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+            const rect = container.getBoundingClientRect();
+            let xPct = ((clientX - rect.left) / rect.width) * 100;
+            let yPct = ((clientY - rect.top) / rect.height) * 100;
+
+            xPct = Math.max(0, Math.min(100, xPct));
+            yPct = Math.max(0, Math.min(100, yPct));
+
+            widget.style.left = xPct + "%";
+            widget.style.top = yPct + "%";
+
+            const dev = savedDevices.find(d => d.name === deviceName);
+            if (dev) {
+                dev.x = xPct;
+                dev.y = yPct;
+            }
+        }
+
+        function stopDrag() {
+            if (isDragging) {
+                isDragging = false;
+                widget.style.zIndex = "10";
+                window.removeEventListener('mousemove', moveHandler);
+                window.removeEventListener('mouseup', stopDrag);
+                window.removeEventListener('touchmove', moveHandler);
+                window.removeEventListener('touchend', stopDrag);
+            }
+        }
+
+        function startDrag(e) {
+            if (!editMode) return;
+            if (e.button && e.button !== 0) return;
+            isDragging = true;
+            widget.style.zIndex = "1000";
+            window.addEventListener('mousemove', moveHandler);
+            window.addEventListener('mouseup', stopDrag);
+            window.addEventListener('touchmove', moveHandler, { passive: false });
+            window.addEventListener('touchend', stopDrag);
+        }
+
+        widget.addEventListener('mousedown', startDrag);
+        widget.addEventListener('touchstart', startDrag, { passive: true });
+    }
+
+    function saveCurrentPositions() {
+        if (window.API && window.API.saveDevicePositions) {
+            const payload = JSON.stringify({ devices: savedDevices });
+            window.API.saveDevicePositions(payload);
+        }
+    }
+
+    function triggerToggle(name) {
+        const dev = savedDevices.find(d => d.name === name);
+        if (dev) {
+            dev.isOn = !dev.isOn;
+            if (dev.isOn) {
+                uptimeData[name] = Date.now();
+            } else {
+                delete uptimeData[name];
+            }
+            renderMapDevices();
+        }
+        if (window.API && window.API.toggle) {
+            window.API.toggle(name);
+        }
+    }
+
+    function startScanning() {
+        document.getElementById("scan-loading").style.display = "block";
+        document.getElementById("scanned-list").innerHTML = "";
+        showAlert("Skenování spuštěno...", "success");
+
+        if (window.API && window.API.scanDevices) {
+            window.API.scanDevices();
+        } else {
+            showAlert("Chyba: Android API nenalezeno.", "error");
+            document.getElementById("scan-loading").style.display = "none";
+        }
+    }
+
+    function receiveDevices(jsonString) {
+        document.getElementById("scan-loading").style.display = "none";
+        const list = document.getElementById("scanned-list");
+        list.innerHTML = "";
+
+        try {
+            tempScannedDevices = JSON.parse(jsonString);
+            const keys = Object.keys(tempScannedDevices);
+
+            const newUnsavedKeys = keys.filter(ip => {
+                return !savedDevices.some(savedDev => savedDev.ip === ip);
+            });
+
+            if (newUnsavedKeys.length === 0) {
+                list.innerHTML = "<li>Všechna nalezená zařízení jsou již v seznamu.</li>";
+                showAlert("Skenování dokončeno (žádná nová zařízení).", "success");
+                return;
+            }
+
+            newUnsavedKeys.forEach(ip => {
+                const name = tempScannedDevices[ip];
+                const li = document.createElement("li");
+                li.style.display = "flex";
+                li.style.justifyContent = "space-between";
+                li.style.alignItems = "center";
+                li.innerHTML = `
+                    <div><strong>${name}</strong><br><small>${ip}</small></div>
+                    <button class="btn" style="width:auto; padding:5px 10px; font-size:12px;" onclick="saveScannedDevice('${name}', '${ip}')">Přidat</button>
+                `;
+                list.appendChild(li);
+            });
+            showAlert("Skenování dokončeno!", "success");
+        } catch (e) {
+            console.error("Chyba při příjmu nalezených zařízení:", e);
+            showAlert("Chyba zpracování dat skenování.", "error");
+        }
+    }
+
+    function saveScannedDevice(name, ip) {
+        if (window.API && window.API.addDevice) {
+            window.API.addDevice(name, ip, false);
+        }
+    }
+
+    function pickFloorplan() {
+        if (window.API && window.API.pickFloorplan) {
+            window.API.pickFloorplan();
+        }
+    }
+
+    function showManualModal() {
+        document.getElementById("manual-modal").style.display = "flex";
+        document.getElementById("manual-name").value = "";
+        document.getElementById("manual-ip").value = "";
+        document.getElementById("manual-status").checked = false;
+    }
+
+    function hideManualModal() {
+        document.getElementById("manual-modal").style.display = "none";
+    }
+
+    function submitManualAdd() {
+        const name = document.getElementById("manual-name").value.trim();
+        const ip = document.getElementById("manual-ip").value.trim();
+        const isOn = document.getElementById("manual-status").checked;
+
+        if (!name || !ip) {
+            showAlert("Vyplňte prosím název i IP adresu.", "error");
+            return;
+        }
+
+        if (window.API && window.API.addDevice) {
+            window.API.addDevice(name, ip, isOn);
+            hideManualModal();
+        }
+    }
+
+    function refreshNetworkStatus() {
+        savedDevices.forEach(dev => {
+            // Žádáme o status z Kotlinu (připojení + skutečný stav)
+            if (window.API && window.API.getStatus) {
+                window.API.getStatus(dev.name);
+            }
+        });
+    }
+
+    function updateUptimeTimers() {
+        savedDevices.forEach(dev => {
+            // Aktualizace timeru uptime pro zapnutá zařízení
+            const safeId = dev.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+            const uptimeDisplay = document.getElementById(`uptime-${safeId}`);
+            if (uptimeDisplay) {
+                if (dev.isOn && uptimeData[dev.name]) {
+                    const diff = Math.floor((Date.now() - uptimeData[dev.name]) / 1000);
+                    const h = String(Math.floor(diff / 3600)).padStart(2, '0');
+                    const m = String(Math.floor((diff % 3600) / 60)).padStart(2, '0');
+                    const s = String(diff % 60).padStart(2, '0');
+                    uptimeDisplay.innerText = `${h}:${m}:${s}`;
+                    uptimeDisplay.style.color = "#34c759";
+                } else {
+                    uptimeDisplay.innerText = "00:00:00";
+                    uptimeDisplay.style.color = "#888";
+                }
+            }
+        });
+    }
+
+    function onStatusReceived(jsonString) {
+        try {
+            const data = JSON.parse(jsonString);
+            const devName = data.deviceName;
+            const safeId = devName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+
+            const statusEl = document.getElementById(`status-${safeId}`);
+            if (statusEl) {
+                if (data.connected) {
+                    statusEl.innerText = "Online";
+                    statusEl.style.color = "#34c759";
+                } else {
+                    statusEl.innerText = "Offline";
+                    statusEl.style.color = "#ff453a";
+                }
+            }
+
+            // Synchronizace stavu (pokud se liší od toho co si myslíme)
+            const dev = savedDevices.find(d => d.name === devName);
+            if (dev && data.connected && dev.isOn !== data.isOn) {
+                dev.isOn = data.isOn;
+                if (dev.isOn && !uptimeData[devName]) {
+                    uptimeData[devName] = Date.now();
+                } else if (!dev.isOn) {
+                    delete uptimeData[devName];
+                }
+                renderMapDevices();
+            }
+        } catch (e) {
+            console.error("Chyba při parsování statusu:", e);
+        }
+    }
+
+    function ShowError(msg) {
+        showAlert(msg, "error");
+        if (window.API && window.API.loadDevices) window.API.loadDevices();
+    }
+
+    function ShowSuccess(msg) {
+        showAlert(msg, "success");
+        if (window.API && window.API.loadDevices) window.API.loadDevices();
+    }
+
+    function showAlert(text, type) {
+        const container = document.getElementById("notification-container");
+        const toast = document.createElement("div");
+        toast.className = `notification ${type}`;
+        toast.innerText = text;
+
+        container.appendChild(toast);
+
+        // Automatické odstranění po 4 sekundách
+        setTimeout(() => {
+            toast.classList.add("hide");
+            setTimeout(() => {
+                toast.remove();
+            }, 300);
+        }, 4000);
+    }
+</script>
+</body>
+</html>
