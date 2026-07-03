@@ -299,9 +299,7 @@ class MainActivity : Activity() {
         for (i in 0 until subnetsToScan) {
             checkIP("192.168.100.$i")
         }
-        
-        // Vždy zkusíme i emulátor pro vývoj
-        checkIP("10.0.2.2")
+    
     }
 
     // Uložení nového zařízení do lokálního souboru
